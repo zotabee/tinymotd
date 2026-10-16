@@ -1,39 +1,54 @@
 #!/usr/bin/env bash
 # /!\ Need openssl binary
 
-#  certificates:
-#    o debian.org  01/01/2035
-#    x github.com  01/01/2020
+# certificates:
+#   o debian.org  01/01/2035
+#   x github.com  01/01/2020
 
-# dommains list separated by space
-domains='debian.org github.com'
+# domains list
+domains=('debian.org' 'github.com')
 
-export LANG='en_US.UTF-8'
-date=$(date +%Y%m%d)
+printf -v date '%(%Y%m%d)T' -1
 data='../data/certs'
 
-certdate(){
-    openssl s_client -servername "${1}" -connect "${1}:443" </dev/null 2>/dev/null \
-     | openssl x509 -noout -enddate 2>/dev/null \
-     | cut -d= -f2
+certdate() {
+    timeout 5 openssl s_client -servername "${1}" -connect "${1}:443" </dev/null 2>/dev/null \
+     | openssl x509 -noout -enddate 2>/dev/null
 }
 
+source ../tools/colors.sh
 [[ -r "${data}" ]] && source "${data}"
 if [[ "${lastupdate}" != "${date}" ]]; then
-    out=''
-    current_stamp=$(date +%s)
-    source ../tools/colors.sh
-    for d in ${domains}; do
+    failed=''
+    declare -A stamps=()
+    for d in "${domains[@]}"; do
         c_raw=$(certdate "${d}")
-        c_date=$(date -d "${c_raw}" +"%d/%m/%Y")
-        c_stamp=$(date -d "${c_raw}" +%s)
-        state=$(c_if_r "${c_stamp}" '>=' "${current_stamp}" 'o' 'x')
-        out+="\n${state} ${d}|${c_date}"
+        if [[ -n "${c_raw}" ]]; then
+            stamps[${d}]=$(date -d "${c_raw#*=}" +%s)
+        else
+            failed=1
+        fi
     done
-    echo "lastupdate=${date}" >  "${data}"
-    echo "out='${out}'"       >> "${data}"
+    # cache only if all domains answered, retry next run otherwise
+    if [[ -z "${failed}" ]]; then
+        lastupdate=${date}
+        declare -p lastupdate stamps > "${data}"
+    fi
 fi
+
+printf -v now '%(%s)T' -1
+out=''
+for d in "${domains[@]}"; do
+    stamp="${stamps[${d}]}"
+    if [[ -z "${stamp}" ]]; then
+        out+="${bred}!${reset} ${d}|unreachable\n"
+        continue
+    fi
+    state=$(c_if_r "${stamp}" '>=' "${now}" 'o' 'x')
+    printf -v c_date '%(%d/%m/%Y)T' "${stamp}"
+    out+="${state} ${d}|${c_date}\n"
+done
 
 echo
 echo 'certificates:'
-echo -e "${out}" | column -t -s '|' | sed 's,^,  ,'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'

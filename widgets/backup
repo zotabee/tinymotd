@@ -1,38 +1,42 @@
 #!/usr/bin/env bash
 
-#backup:
-#  o os (5d)  x cloud (45d)
+# backup:
+#   o os (5d)  x cloud (45d)
 
 columns=2
-maxage=35 #day
+age_warn=35 # day(s)
 
+# One backup per line: '<name>  <status file>'
 # status file must contain: YYYYMMDD;success or YYYYMMDD;failed
-bkp_dir='/backup'
-bkp_files+=("${bkp_dir}/os/status");     bkp_names+=('os')
-bkp_files+=("${bkp_dir}/cloud/status");  bkp_names+=('cloud')
+backups=(
+  "os     /backup/os/status"
+  "cloud  /backup/cloud/status"
+)
 
-out=''
 source ../tools/colors.sh
-for i in "${!bkp_files[@]}"; do
-    if ! [ -f "${bkp_files[$i]}" ]; then
-        diff="!"
-	bkp_status=$(c_match_r "${bkp_status}" '!' '' "${pt}")
+
+printf -v now '%(%s)T' -1
+out=''
+for i in "${!backups[@]}"; do
+    bkp_name="${backups[${i}]%% *}"
+    bkp_file="${backups[${i}]##* }"
+    if [[ ! -f "${bkp_file}" ]]; then
+        age='-'
+        bkp_status="${bred}!${reset}"
     else
-        bkp_status=$(tail -n1 "${bkp_files[$i]}" | cut -d';' -f2)
-        bkp_date_raw=$(tail -n1 "${bkp_files[$i]}" | cut -d';' -f1)
-        bkp_date=$(date -d "${bkp_date_raw}" +"%d/%m/%Y")
+        IFS=';' read -r bkp_date bkp_status < <(tail -n1 "${bkp_file}")
+        diff=$(( (now - $(date -d "${bkp_date}" +%s)) / 86400 ))
+        age="${diff}d"
         if [[ "${bkp_status}" == 'success' ]]; then
-            diff=$(( ($(date +%s)-$(date +%s -d ${bkp_date_raw}))/86400 ))
-            bkp_status=$(c_if_r "${diff}" '<' "${maxage}" 'o' 'x')
+            bkp_status=$(c_if_r "${diff}" '<' "${age_warn}" 'o' 'x')
         else
-            bkp_status=$(c_match_r "${bkp_status}" '!' '' 'x')
+            bkp_status="${bred}x${reset}"
         fi
     fi
-    out+="${bkp_status} ${bkp_names[$i]} (${diff}d)|"
-    (( $(( (i+1) % columns )) == 0 )) && out+='\n'
+    out+="${bkp_status} ${bkp_name} (${age})|"
+    (( (i+1) % columns == 0 )) && out+='\n'
 done
-out+='\n'
 
 echo
 echo 'backup:'
-echo -e "${out}" | column -ts '|' | sed -e 's/^/  /'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'

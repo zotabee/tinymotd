@@ -1,39 +1,38 @@
 #!/usr/bin/env bash
 
 # go to script dir
-cd "$(dirname "$(readlink -f "$0")")"
+dir=$(readlink -f "${0}"); cd "${dir%/*}"
 
 # create data dir
-if ! [[ -d "$(pwd)/data" ]]; then
-    mkdir "$(pwd)/data"
-fi
+mkdir -p data
 # remove old data
-if [[ $1 == '-f' ]]; then
-    rm -f "$(pwd)/data"/*
+shopt -s extglob
+if [[ ${1} == '-f' ]]; then
+    rm -f data/!(motd)
 fi
 
 # print header
 cat headers/* 2>/dev/null
 
 # get widgets results
-col=$(awk -F'=' '/^# col=/ {print $2}' ./config)
 cd widgets
 # execute widgets in columns
-for i in $(seq 1 "${col}"); do
-    for w in $(awk '!/^#/ {print $'$i'}' ../config); do
+while read -ra row; do
+    [[ ${row[0]} == \#* ]] && continue
+    for i in "${!row[@]}"; do
         # append content
-        [ -e "${w}" ] && f[$i]="${f[$i]} $(./${w} 2>/dev/null)\n"
+        [[ -f ${row[${i}]} ]] && f[${i}]+="${f[${i}]:+\n}$(./"${row[${i}]}" 2>/dev/null)"
     done
-done
+done < ../config
 
 # print
 motd=''
 for c in "${f[@]}"; do
-    [[ -z ${motd} ]] && motd="${c}" || motd=$(paste <(echo -e "${motd}") <(echo -e "${c}") -d'@')
+    [[ -z ${motd} ]] && motd="${c}" || motd=$(paste <(echo -e "${motd}") <(echo -e "${c}"))
 done
-echo -e "${motd}" | column -ts '@'
+echo -e "${motd}" | column -Lts $'\t'
 
 # print messages
 cd ..
 cat messages/* 2>/dev/null
-exit 0
+echo

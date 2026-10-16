@@ -2,48 +2,48 @@
 # /!\ Need smartmontools binaries
 
 # disks health:
-#          Pwr  Temp  Cycl  Relc
-#   o sda  1y   36°   0k    0
-#   x sdb  5y   44°   1k    0
+#              Pwr  Temp  Cycl  Relc
+#   o sda      1y   36°   0k    0
+#   x sdb      5y   44°   1k    0
+#   o nvme0n1  1y   48°   .     0
 
 poweron_warn=3 # year(s)
 temp_warn=50 # °c
 loadcycle_warn=10 # K cycle(s)
+sector_warn=1 # sector(s)
 
 source ../tools/colors.sh
-mapfile -t disks < <(lsblk -Spno KNAME)
-out=" |Pwr|Temp|Cycl|Relc\n"
+mapfile -t disks < <(lsblk -Spno KNAME; lsblk -Npno KNAME)
+out=' |Pwr|Temp|Cycl|Relc\n'
 for disk in "${disks[@]}"; do
-    smart="$(smartctl -A -H -d sat "${disk}")"
+    age='.' temp='.' cycle='.' sect='.' health=''
 
-    # Get power on age
-    age_h="$(echo "${smart}" | awk '/Power_On_Hours/ {print $10}')"
-    if [[ -n "${age_h}" ]]; then
-        age="$(c_if $(( age_h/24/365 )) '<' "${poweron_warn}" 'y')"
-    else
-        age='.'
-    fi
-
-    # Get temperature
-    temp="$(echo "${smart}" | awk '/Temperature_Celsius|Airflow_Temperature_Cel/ {print $10}')"
-    temp="$(c_if ${temp} '<' "${temp_warn}" '°')"
-
-    # Get disk cycle
-    cycle="$(echo "${smart}" | awk '/Load_Cycle_Count/ {print $10}')"
-    if [[ -n "${cycle}" ]]; then
-       cycle="$(c_if $(( cycle/1000 )) '<' "${loadcycle_warn}" 'k')"
-    else
-       cycle='.'
-    fi
-
-    # Get sectors and disk health
-    sect="$(echo "${smart}" | awk '/Reallocated_Sector_Ct/ {print $10}')"
-    health="$(echo "${smart}" | grep -o 'PASSED$')"
-    state="$(c_match_r "${health}" 'PASSED' 'o' 'x')"
-
+    # parse smart output:
+    #   nvme "key: value" (digits grouped by locale)
+    #   ata attributes table (10th field is the raw value)
+    while IFS= read -r line; do
+        case "${line}" in
+            *overall-health*) health="${line##* }"; continue ;;
+            *:*)              key="${line%%:*}"; value="${line#*:}"; value="${value//[!0-9]/}" ;;
+            *)                read -r _ key _ _ _ _ _ _ _ value _ <<< "${line}"; value="${value%%[!0-9]*}" ;;
+        esac
+        case "${key}" in
+            'Power_On_Hours'|'Power On Hours')
+                age=$(c_if $(( value/24/365 )) '<' "${poweron_warn}" 'y') ;;
+            'Airflow_Temperature_Cel')
+                [[ "${temp}" == '.' ]] && temp=$(c_if "${value}" '<' "${temp_warn}" '°') ;;
+            'Temperature_Celsius'|'Temperature')
+                temp=$(c_if "${value}" '<' "${temp_warn}" '°') ;;
+            'Load_Cycle_Count')
+                cycle=$(c_if $(( value/1000 )) '<' "${loadcycle_warn}" 'k') ;;
+            'Reallocated_Sector_Ct'|'Media and Data Integrity Errors')
+                sect=$(c_if "${value}" '<' "${sector_warn}") ;;
+        esac
+    done < <(smartctl -A -H "${disk}")
+    state=$(c_match_r "${health}" 'PASSED' 'o' 'x')
     out+="${state} ${disk##*/}|${age}|${temp}|${cycle}|${sect}\n"
 done
 
 echo
 echo 'disks health:'
-echo -e "${out}" | column -ts'|' | sed 's,^,  ,'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'

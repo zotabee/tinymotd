@@ -1,39 +1,46 @@
 #!/usr/bin/env bash
+# /!\ Need procps binaries
 
-#  system info:
-#    6.0  kern    225   tasks
-#    90%  cpu     1.35  load
-#    35%  memory  65°c  temp
+# system info:
+#   6.0  kernel  225   tasks
+#   90%  cpu     1.35  load
+#   35%  memory  65°   temp
 
 mem_warn=50  # %
 cpu_warn=20  # %
 temp_warn=60 # °c
 
-ps="$(ps --ppid 2 -p 2 --deselect | wc -l)"
-load="$(cat /proc/loadavg | cut -d' ' -f3)"
-users="$(w -h | wc -l)"
-up="$(( $(cat /proc/uptime | cut -d'.' -f1) / 3600 / 24 ))"
-mem="$(free -b | awk 'FNR == 2 {p=100*$3/$2} END{printf("%0.f",p)}')"
-cpunb="$(grep -i '^processor' /proc/cpuinfo | wc -l)"
-cpu="$(../tools/cpu.sh)"
-kern="$(uname -r | cut -d'.' -f1-2)"
-
 source ../tools/colors.sh
+ps=$(ps --ppid 2 -p 2 --deselect -o pid= | wc -l)
+read -r _ _ load _ < /proc/loadavg
+while read -r key value _; do
+    case "${key}" in
+        MemTotal:)     mem_total="${value}" ;;
+        MemAvailable:) mem_avail="${value}" ;;
+    esac
+done < /proc/meminfo
+mem=$(( 100 * (mem_total - mem_avail) / mem_total ))
+cpus=(/sys/devices/system/cpu/cpu[0-9]*)
+cpunb=${#cpus[@]}
+cpu=$(../tools/cpu.sh)
+IFS=. read -r kern_major kern_minor _ < /proc/sys/kernel/osrelease
+
 #ps=$(c_if "${ps}" '<' '150')
 mem_status=$(c_if  "${mem}"  '<' "${mem_warn}" '%')
-load_status=$(c_if "${load}" '<' "$cpunb")
+load_status=$(c_if "${load}" '<' "${cpunb}")
 cpu_status=$(c_if  "${cpu}"  '<' "${cpu_warn}" '%')
 
-out+="${kern}|kernel|${ps}|tasks\n"
+out=''
+out+="${kern_major}.${kern_minor}|kernel|${ps}|tasks\n"
 out+="${cpu_status}|cpu|${load_status}|load\n"
 out+="${mem_status}|memory|"
 if [[ -f '/sys/class/thermal/thermal_zone0/temp' ]]; then
-    temp="$(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 ))"
-    temp=$(c_if "${temp}" '<' "${temp_warn}" '°c')
+    read -r temp < /sys/class/thermal/thermal_zone0/temp
+    temp=$(c_if "$(( temp / 1000 ))" '<' "${temp_warn}" '°')
     out+="${temp}|temp\n"
 fi
 
 echo
 echo 'system info:'
-echo -e "${out}" | column -ts'|' | sed 's,^,  ,'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'
 #echo "${cpu_status} cpu ${cpu}%   ${mem_status} mem ${mem}%   ${load_status} load ${load}" | sed 's,^,  ,'

@@ -1,24 +1,30 @@
 #!/usr/bin/env bash
+# /!\ Need wget binary
 
-#  network:
-#    public ip    10.20.30.40
-#    private ip   192.168.0.100
+# network:
+#   public ip   10.20.30.40
+#   private ip  192.168.0.100
 
-date=$(date +%Y%m%d)
+printf -v date '%(%Y%m%d)T' -1
 data='../data/network'
 
 [[ -r "${data}" ]] && source "${data}"
 if [[ "${lastupdate}" != "${date}" ]]; then
-    privateip=$(ip route get 1.2.3.4 | awk '/^1.2.3.4/ {print $7}')
-    publicip=$(wget -qO - http://ifconfig.io/ip)
-    echo "lastupdate=${date}"     >  "${data}"
-    echo "publicip=${publicip}"   >> "${data}"
-    echo "privateip=${privateip}" >> "${data}"
+    publicip=$(wget -qT 5 -O - https://ifconfig.io/ip)
+    # cache only a valid ip, retry next run otherwise
+    if [[ ${publicip} =~ ^[0-9a-f.:]+$ ]]; then
+        lastupdate=${date}
+        declare -p lastupdate publicip > "${data}"
+    fi
 fi
+route=$(ip route get 1.2.3.4)
+route=${route#* src }
+privateip=${route%% *}
+
 out=''
 out+="public ip|${publicip}\n"
 out+="private ip|${privateip}\n"
 
 echo
 echo 'network:'
-echo -e "${out}" | column -ts'|' | sed 's,^,  ,'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'

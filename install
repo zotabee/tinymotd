@@ -1,31 +1,35 @@
 #!/usr/bin/env bash
 
+usage() {
+    echo "usage: ./${0##*/} --user <USER> [--uninstall]"
+}
+
 # verify permission
-if [ "${EUID:-$(id -u)}" != 0 ]; then
-    echo >&2 "error: permission denied"
-    echo >&2 'installation requires root privileges'
+if [[ "${EUID}" != 0 ]]; then
+    echo 'Error: permission denied' >&2
+    echo 'installation requires root privileges' >&2
     exit 1
 fi
 
 # go to script dir
-cd "$(dirname "$(readlink -f "$0")")"
+dir=$(readlink -f "${0}"); cd "${dir%/*}"
 
 # add cron scheduled job
-add_cron(){
+add_cron() {
     local name="${1}"
     local cmd="${2}"
     local motd="${3}"
-    cron_file="/etc/cron.hourly/${name}"
+    local cron_file="/etc/cron.hourly/${name}"
     echo "[+] add cron in ${cron_file}"
     cat << EOF > "${cron_file}"
 #!/usr/bin/env sh
-${cmd} > "${motd}"
+"${cmd}" > "${motd}"
 EOF
     chmod +x "${cron_file}"
 }
 
 # add systemd scheduled job
-add_systemd(){
+add_systemd() {
     local name="${1}"
     local cmd="${2}"
     local motd="${3}"
@@ -34,17 +38,13 @@ add_systemd(){
     cat << EOF > "${service_file}"
 [Unit]
 Description=${name} executor
-After=network.target
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
 ExecStart=${cmd}
 StandardOutput=truncate:${motd}
-StandardError=truncate:${motd}
-
-[Install]
-WantedBy=multi-user.target
 EOF
     local timer_file="/etc/systemd/system/${name}.timer"
     echo "[+] add timer in ${timer_file}"
@@ -55,48 +55,87 @@ Description=${name} timer
 [Timer]
 OnCalendar=hourly
 AccuracySec=5s
+Persistent=true
 
 [Install]
 WantedBy=timers.target
 EOF
     systemctl daemon-reload
-    systemctl enable --now ${name}.timer
+    systemctl enable --now "${name}.timer"
+}
+
+# remove scheduled jobs and motd print
+uninstall() {
+    local name="${1}"
+    local bashrc="${2}"
+    if [[ -f "/etc/systemd/system/${name}.timer" ]]; then
+        echo "[-] remove service and timer in /etc/systemd/system"
+        systemctl disable --now "${name}.timer"
+        rm -f "/etc/systemd/system/${name}".{service,timer}
+        systemctl daemon-reload
+    fi
+    if [[ -f "/etc/cron.hourly/${name}" ]]; then
+        echo "[-] remove cron in /etc/cron.hourly/${name}"
+        rm -f "/etc/cron.hourly/${name}"
+    fi
+    if grep -qsx '# motd supervision' "${bashrc}"; then
+        echo "[-] remove motd load in ${bashrc}"
+        sed -i '/^# motd supervision$/,/^fi$/d' "${bashrc}"
+    fi
 }
 
 # parse args
-while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
-    case "$1" in
-        -u|--user)      shift; user="$1";;
+while (( ${#} )); do
+    case "${1}" in
+        -u|--user)      shift; user="${1}";;
+        --uninstall)    uninstall=1;;
+        *)              echo "Error: unknown option ${1}" >&2; exit 1;;
     esac
     shift
 done
 
 if [[ -z "${user}" ]]; then
-    echo >&2 "error: no user specified"
-    echo >&2 "usage: ./$(basename "${0}") --user <USER>"
+    echo 'Error: no user specified' >&2
+    usage >&2
     exit 1
 fi
 
 # get homedir
-home="$(getent passwd "${user}" | cut -d: -f6)"
+IFS=: read -r _ _ _ _ _ home _ < <(getent passwd "${user}")
+if [[ -z "${home}" ]]; then
+    echo "Error: unknown user '${user}'" >&2
+    exit 1
+fi
+
+if [[ -n "${uninstall}" ]]; then
+    uninstall 'tinymotd' "${home}/.bashrc"
+    exit 0
+fi
+
+# create data dir
+mkdir -p data
 
 # search for job scheduler
-motd="$(pwd)/data/motd"
-if [[ -d /run/systemd/system ]]; then 
-    add_systemd 'tinymotd' "$(pwd)/generate" "${motd}"
-elif [[ -d /etc/cron.hourly ]]; then 
-    add_cron 'tinymotd' "$(pwd)/generate" "${motd}"
+motd="${PWD}/data/motd"
+if [[ -d /run/systemd/system ]]; then
+    add_systemd 'tinymotd' "${PWD}/generate" "${motd}"
+elif [[ -d /etc/cron.hourly ]]; then
+    add_cron 'tinymotd' "${PWD}/generate" "${motd}"
 else
-    echo >&2 "error: no job scheduler method found"
+    echo 'Error: no job scheduler method found' >&2
     exit 1
 fi
 
 # add print
 bashrc="${home}/.bashrc"
-echo "[+] add motd load in ${bashrc}"
-cat << EOF >> "${bashrc}"
+if grep -qsF "${motd}" "${bashrc}"; then
+    echo "[=] motd load already in ${bashrc}"
+else
+    echo "[+] add motd load in ${bashrc}"
+    cat << EOF >> "${bashrc}"
 # motd supervision
-if [[ -f ${motd} ]]; then
-    cat ${motd}
+if [[ -r '${motd}' ]]; then
+    cat '${motd}'
 fi
 EOF
+fi

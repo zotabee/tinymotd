@@ -1,17 +1,21 @@
 # Widget layout configuration file
-# Available widgets: 
+#
+# One widget per column, '-' leaves the cell empty.
+# Each column is stacked independently: widgets of
+# a same line are not aligned with each other.
+#
+# Available widgets:
 #
 #   apt, backup, certs, disks, docker,
 #   lastexec, lxc, network, pacman,
-#   partitions, services, systemd, sysinfo
+#   partitions, services, sysinfo, systemd
 #
-# For widget configuration, edit the corresponding 
+# For widget configuration, edit the corresponding
 # widget file in the widget directory
 
-# col=2
 sysinfo   network
 services  disks
-lxc       partitions
+docker    partitions
 apt       certs
--         lastexec
+lastexec  -
 

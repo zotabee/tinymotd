@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 
 # partitions usage:
-#   30%  /      50%  /backup
+#   30%  /
+#   50%  /backup
 #   25%  /data
 
-columns=2
+columns=1
 disk_warn=80 # %
-filter='_nothing_' # excluded target separated by |
+filter='docker/overlay' # excluded target separated by |
 
 #width=7
 #bar() {
@@ -18,17 +19,18 @@ filter='_nothing_' # excluded target separated by |
 #}
 
 source ../tools/colors.sh
-mapfile -t dfs < <(df -hT | grep -vE "tmpfs|vfat|efivarfs|${filter}" | tail -n+2 | sort -k7)
+mapfile -t dfs < <(df -hT | tail -n +2 | grep -vE "tmpfs|vfat|efivarfs|${filter}" | sort -k7)
 
+out=''
 for i in "${!dfs[@]}"; do
-    IFS=" " read device type size used avail pcent target <<< "${dfs[${i}]}"
-    pcentnb=$(echo ${pcent} | sed 's,%,,')
+    read -r _ _ _ _ _ pcent target <<< "${dfs[${i}]}"
+    pcentnb="${pcent%\%}"
     pcent=$(c_if "${pcentnb}" '<' "${disk_warn}" '%')
     out+="${pcent}|${target}|"
     #out+="$(bar ${pcentnb} ${width})|${pcent}|${target}|"
-    (( $(( (i+1) % columns )) == 0 )) && out+='\n'
+    (( (i+1) % columns == 0 )) && out+='\n'
 done
 
 echo
 echo 'partitions usage:'
-echo -e "${out}" | column -ts'|' | sed 's,^,  ,'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'

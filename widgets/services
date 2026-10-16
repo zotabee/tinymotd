@@ -1,22 +1,29 @@
 #!/usr/bin/env bash
+# /!\ Need systemctl binary
 
-#  services:
-#    x lxc  o firewall  o sshd
+# services:
+#   x lxc  o firewall  o ssh
 
 columns=3
-units=(    'lxc' 'nftables' 'sshd')
-svc_names=('lxc' 'firewall' 'ssh')
+
+# One service per line: '<name>  <unit>'
+# Comment a line to disable
+services=(
+  'lxc       lxc'
+  'firewall  nftables'
+  'ssh       sshd'
+)
+
+source ../tools/colors.sh
+mapfile -t svc_states < <(systemctl is-active "${services[@]##* }")
 
 out=''
-source ../tools/colors.sh
-for i in "${!units[@]}"; do
-    svc_status=$(systemctl is-active "${units[${i}]}")
-    svc_status=$(c_match_r "${svc_status}" 'active' 'o' 'x')
-    out+="${svc_status} ${svc_names[$i]}|"
-    (( $(( (i+1) % columns )) == 0 )) && out+='\n'
+for i in "${!services[@]}"; do
+    svc_status=$(c_match_r "${svc_states[${i}]}" 'active' 'o' 'x')
+    out+="${svc_status} ${services[${i}]%% *}|"
+    (( (i+1) % columns == 0 )) && out+='\n'
 done
-out+='\n'
 
 echo
 echo 'services:'
-echo -e "${out}" | column -ts '|' | sed -e 's/^/  /'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'

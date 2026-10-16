@@ -1,26 +1,31 @@
 #!/usr/bin/env bash
+# /!\ Need systemctl binary
 
-#  systemd:
-#    x systemd-networkd   x nftables
-#    x apparmor
+# systemd:
+#   x systemd-networkd  x nftables
+#   x apparmor
 
 columns=2
 
-out=''
 source ../tools/colors.sh
 
-if systemctl --quiet is-system-running; then
-    _ok=$(c_match 'o' 'o')
-    out="${_ok} operational"
+out=''
+state=$(systemctl is-system-running)
+if [[ "${state}" == 'running' ]]; then
+    out="${bgreen}o${reset} operational"
 else
-    _ko=$(c_match 'x' '!')
-    mapfile -t failed_services < <(systemctl list-units --failed --plain --no-legend | cut -d' ' -f1)
+    mapfile -t failed_services < <(systemctl list-units --failed --plain --no-legend)
     for i in "${!failed_services[@]}"; do
-        out+="${_ko} ${failed_services[${i}]%.*}|"
-        (( $(( (i+1) % columns )) == 0 )) && out+='\n'
+        unit="${failed_services[${i}]%% *}"
+        out+="${bred}x${reset} ${unit%.*}|"
+        (( (i+1) % columns == 0 )) && out+='\n'
     done
+    # no failed unit: show state (starting, maintenance, ...)
+    if [[ -z "${out}" ]]; then
+        out="${bred}x${reset} ${state}"
+    fi
 fi
 
 echo
 echo 'systemd:'
-echo -e "${out}" | column -ts '|' | sed -e 's/^/  /'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'

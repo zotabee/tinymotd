@@ -1,57 +1,55 @@
 #!/usr/bin/env bash
+# /!\ Need apt packages manager
 
 # packages:
 #   4 upgradable  2 security
 #   3 cleanable   0 obsolete
 #   ! reboot required
 
-date=$(date +%Y%m%d)
+printf -v date '%(%Y%m%d)T' -1
 data='../data/apt'
 columns=2
 
 source ../tools/colors.sh
 [[ -r "${data}" ]] && source "${data}"
 
+# One query per line: '<name>  <apt pattern>'
 # Comment a line to disable
 packages_query=(
-  "?upgradable                                 upgradable"
-  "?and(?upgradable,?origin(Debian-Security))  security"
-  "?or(?garbage,?config-files)                 cleanable"
-  "?obsolete                                   obsolete"
-#  "?garbage                                    removable"
-#  "?config-files                               residual"
+  'upgradable  ?upgradable'
+  'security    ?and(?upgradable,?origin(Debian-Security))'
+  'cleanable   ?or(?garbage,?config-files)'
+  'obsolete    ?obsolete'
+#  'removable   ?garbage'
+#  'residual    ?config-files'
 )
 
 if [[ "${lastupdate}" != "${date}" ]]; then
-    apt-get -qq update
-    {
-      echo "lastupdate=${date}"
-      for entry in "${packages_query[@]}"; do
-          IFS=" " read -r query label <<< "${entry}"
-          value=$(apt -qq list "${query}" 2>/dev/null | wc -l)
-          echo "${label,,}_pkgs=${value}"
-      done
-    } > "${data}"
-    # read to source to load values
-    source "${data}"
+    # on update failure, keep lastupdate to retry next run
+    apt-get -qq update && lastupdate="${date}"
+    declare -A pkgs
+    for entry in "${packages_query[@]}"; do
+        label="${entry%% *}"
+        query="${entry##* }"
+        pkgs[${label}]=$(apt -qq list "${query}" 2>/dev/null | wc -l)
+    done
+    declare -p lastupdate pkgs > "${data}"
 fi
 
 out=''
 for i in "${!packages_query[@]}"; do
-    IFS=" " read -r _ label <<< "${packages_query[$i]}"
-    var="${label,,}_pkgs"
-    value=$(c_if "${!var}" '<' '1')
+    label="${packages_query[${i}]%% *}"
+    value=$(c_if "${pkgs[${label}]}" '<' '1')
     out+="${value} ${label}|"
-    (( (i+1) % columns == 0 )) && out+=$'\n'
+    (( (i+1) % columns == 0 )) && out+='\n'
 done
 if [[ -z "${out}" ]]; then
     out='none'
 fi
-out+='\n'
 
 echo
 echo 'packages:'
-echo -e "${out}" | column -ts '|' | sed -e 's/^/  /'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'
 
 if [[ -f /run/reboot-required ]]; then
     echo -e "  ${bred}!${reset} reboot required"

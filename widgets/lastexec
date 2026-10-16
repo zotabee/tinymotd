@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-#  last execution:
-#    Tuesday 18 February, 21:33:31
+# last execution:
+#   2026-02-18, 21:33:31
 
 echo
-echo "last execution:"
-LC_ALL=en_EN.utf8 date +"%A %d %B, %H:%M:%S" | sed 's,^,  ,'
+echo 'last execution:'
+printf '  %(%Y-%m-%d, %H:%M:%S)T\n' -1

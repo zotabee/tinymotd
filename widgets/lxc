@@ -1,28 +1,27 @@
 #!/usr/bin/env bash
 # /!\ Need lxc binaries
 
-#  containers:
-#    o git   o mailer
-#    o dlna  x plex
+# containers:
+#   o git   o mailer  o dlna
+#   x plex
 
-columns=3
-filter='nothing'  # excluded containers separated by |
+columns=2
+filter='_nothing_'  # excluded containers separated by |
 
-mapfile -t containers < <(lxc-ls -f | awk '!/^('${filter}')/{print $1,$2}' | sed '/^\s*$/d' | tail -n+2)
+source ../tools/colors.sh
+mapfile -t -s 1 containers < <(lxc-ls -f | grep -Ev "^(${filter})|^$")
 
 out=''
-source ../tools/colors.sh
 for i in "${!containers[@]}"; do
-    IFS=" " read name state <<< "${containers[$i]}"
-    state=$(c_match_r "${state}" 'RUNNING' "o" "x")
+    read -r name state _ <<< "${containers[${i}]}"
+    state=$(c_match_r "${state}" 'RUNNING' 'o' 'x')
     out+="${state} ${name}|"
-    (( $(( (i+1) % columns )) == 0 )) && out+='\n'
+    (( (i+1) % columns == 0 )) && out+='\n'
 done
 if [[ -z "${out}" ]]; then
     out='none'
 fi
-out+='\n'
 
 echo
 echo 'containers:'
-echo -e "${out}" | column -ts '|' | sed -e 's/^/  /'
+echo -e "${out}" | column -ts '|' | sed 's/^/  /'
